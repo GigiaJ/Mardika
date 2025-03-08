@@ -5,8 +5,8 @@
   "src/test"]
 
  :dependencies
- []
-
+ [[reagent "1.1.1"] [re-frame "1.4.3"] [cljs-ajax "0.8.1"] [environ "1.2.0"] [adzerk/env "0.4.0"]]
+:build-hooks [(shadow-env.core/hook)]
  :dev-http
  {8020 "public"}
 
@@ -15,7 +15,11 @@
   {:target :browser
    :output-dir "public/js"
    :asset-path "/js"
-
+   :closures-defines {
+                      "process.env.API_KEY" (System/getenv "API_KEY")
+                      "process.env.VID_SRC" (System/getenv "VID_SRC")
+                      "process.env.BASE_URL" (System/getenv "BASE_URL")
+                      }
    :modules
    {:main ; becomes public/js/main.js
     {:init-fn starter.browser/init}}}}}
