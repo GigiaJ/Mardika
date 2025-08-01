@@ -9,7 +9,7 @@
 ]
 :build-hooks [(shadow-env.core/hook)]
  :dev-http
- {8020 "public"}
+ {8020 "resources"}
 
  :builds
  {:app
