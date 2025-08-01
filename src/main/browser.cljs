@@ -2,9 +2,32 @@
   (:require [re-frame.core :as rf]
             [reagent.core :as r]
             [reagent.dom :as dom]
-            [ajax.core :refer [GET json-response-format]]
-            [cljs.core.async :refer [chan timeout put! <! go-loop]] 
+            [ajax.core :refer [GET raw-response-format json-response-format]]
+            [cljs.core.async :refer [chan timeout put! go <! go-loop]] 
             [env :refer [env]]))
+
+
+(defn temp-url [url callback]
+  (let [c (chan)]
+   (println "Fetching from URL:" url)
+   (GET url
+     {:response-format (raw-response-format)
+      :handler #(do
+                  (println "Received response:" (js->clj %))
+                  (put! c %))
+      :error-handler #(do
+                        (js/console.error "Error occurred:" %)
+                        (put! c nil))})
+   (go-loop []
+     (let [response (<! c)] 
+       (println "processing " response)
+       (if (nil? response)
+         (do
+           (println "Response is nil, retrying in 1 second...")
+           (<! (timeout 1000)) ; Wait for 1 second before retrying
+           (recur)) ; Retry 
+         )
+       (callback response)))))
 
 (defn get-url [url]
   (let [c (chan)]
@@ -82,8 +105,8 @@
 (rf/reg-event-db
  :search-movies
  (fn [db [_ query]]
-   (let [url (str (env :base-url)  "/search/movie?api_key=" (env :api-key) "&query=" query)]
-     (println "Searching movies for query:" query "with URL:" url)
+   (let [url (str (env :base-url)  "/search/multi?api_key=" (env :api-key) "&query=" query)]
+     (println "Searching for query:" query "with URL:" url)
      (get-url url)
      (when-not (:loading? db)
        {:db (assoc db :loading? true)
@@ -92,27 +115,72 @@
 (defn search-bar []
   (let [query (r/atom "")]
     (fn []
-      [:div
+      [:div {:style {:display "flex"
+                     :align-items "center"
+                     :justify-content "center"
+                     :margin-top "50px"}}
        [:input {:type "text"
+                :class "search-input wide"
                 :placeholder "Search for title..."
                 :value @query
-                :on-change #(reset! query (-> % .-target .-value))}]
-       [:button {:on-click #(rf/dispatch [:search-movies @query])} "Search"]])))
+                :on-change #(reset! query (-> % .-target .-value))
+                :on-key-down #(when (= (.-key %) "Enter")
+                                (rf/dispatch [:search-movies @query]))}]
+       [:button {:class "search-button small"
+                 :on-click #(rf/dispatch [:search-movies @query])} "Search"]])))
 
 (defn vid-src-handle [props]
   (let [tv? (= "tv" (:media_type props))]
     (str (env :vid-src) (if tv? "tv" "movie") "/" (:id props) (if tv? "/1/1" ""))))
 
+
+(rf/reg-sub
+ :provider
+ (fn [db _]
+   (:provider db)))
+
+(rf/reg-event-db
+ :load-provider
+ (fn [db [_ provider]]
+   (assoc db :provider provider)))
+
+(def iframe-ref (r/atom nil))
+
 (defn expanded-interface [props]
-  [:div
-   {:style {:position "fixed" :top 0 :left 0 :width "100%" :height "100%" :background-color "white" :z-index 1000 :overflow "auto"}}
-   [:button {:on-click #(rf/dispatch [:collapse-item])} "Close"]
-   [:h3 (:title props)]
-   [:iframe {:allowFullScreen true
-             :autoPlay true
-             :src (vid-src-handle props)
-             :style {:width "100%"
-                     :height "85%"}}]])
+  (let [vidya @(rf/subscribe [:provider])]
+        [:div
+         {:style {:position "fixed"
+                  :bottom 0
+                  :left 0
+                  :width "100%"
+                  :height "100%"
+                  :background-color "black"
+                  :z-index 1000
+                  :overflow "auto"}}
+         [:button.close {:on-click #(rf/dispatch [:collapse-item])} "Back"] 
+         [:iframe {:allowFullScreen true
+                   :autoPlay true
+                   :src (vid-src-handle props)
+                   :ref #(reset! iframe-ref %)
+                   :style {:width "100%"
+                           :height "100%"
+                           :z-index 1000}
+                   :on-load #((go (<! (timeout 8000 ))
+                                  (js/console.log (.-documentElement js/document))))}]
+         #_(when vidya
+           [:div {:dangerouslySetInnerHTML {:__html vidya}}])]))
+
+
+
+
+#_[       [:div.vidya
+        {:dangerouslySetInnerHTML {:__html (or @html-content "Loading...")}}]] ; Inject raw HTML content]
+#_[:iframe {:allowFullScreen true
+                 :autoPlay true
+                 :src (vid-src-handle props)
+                 :style {:width "100%"
+                         :height "95%"
+                         :z-index 1000}}]
 
 (rf/reg-sub
  :expanded-item
@@ -128,6 +196,8 @@
  :collapse-item
  (fn [db _]
    (dissoc db :expanded-item)))
+
+
 
 ;; Subscriptions
 (rf/reg-sub
@@ -159,8 +229,13 @@
             ;; Show hover interface
             (if @hovered
               [:div
-               {:on-click #((println (:id props))
-                            (rf/dispatch [:expand-item (:id props)]))}
+               {:on-click 
+                            #_(fn [e] (set! (.-href js/window.location) "/api?url=https://vidbinge.dev/embed/movie/1104845"))
+                            (do
+                               
+
+                               #_(temp-url "http://localhost:8080/api?url=https://vidbinge.dev/embed/movie/1104845" (fn [e] (rf/dispatch [:load-provider e])))
+                               #(rf/dispatch [:expand-item (:id props)]))}
                ;; Hover overlay content
                [:div {:class "overlay"}
                 ;; Title
@@ -183,9 +258,11 @@
      [(with-hover item-component) item])])
 
 (defn chunk-items [items chunk-size]
-  (map-indexed (fn [index chunk]
-                 {:id index :items chunk})
-               (partition-all chunk-size items)))
+  (let [filtered-items (filter :poster_path items)]
+    (map-indexed (fn [index chunk]
+                   {:id index :items chunk})
+                 (partition-all chunk-size filtered-items))))
+
 
 ;; Components
 (defn main-page []
@@ -204,7 +281,7 @@
             loading? @(rf/subscribe [:loading?])]
         (println "Rendering items:" items)
         [:div
-         [:h1 "Endless Scrolling TMDB"]
+         [:h1 {:style {:text-align "center"}} "Mardika"]
          [:div [search-bar]]
          (for [chunk (chunk-items items 4)] ;; Chunk items into groups of 4
            ^{:key (:id chunk)} ;; Use the unique :id for the key
