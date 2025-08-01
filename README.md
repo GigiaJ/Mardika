@@ -126,3 +126,24 @@ Use `CTRL+C` to stop the `watch` process and instead run `npx shadow-cljs releas
 When done you can open `http://localhost:8020` and see the `release` build in action. At this point you would usually copy the `public` directory to the "production" web server.
 
 Note that in the default config we overwrote the `public/js/main.js` created by the `watch`. You can also configure a different path to use for release builds but writing the output to the same file means we do not have to change the `index.html` and test everything as is.
+
+
+
+
+
+
+
+
+
+
+
+
+
+export $(cat ./.env | grep -v ^# | xargs) >/dev/null
+npx shadow-cljs watch app
+
+
+
+
+
+
